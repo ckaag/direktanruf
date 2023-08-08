@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+option java_package = "com.github.ckaag";
+option java_multiple_files = true;
+
+message CallOption {
+  string name = 1;
+  string number = 2;
+  string sim = 3;
+}
+
+
+message AppConfig {
+  repeated CallOption options = 1;
+}

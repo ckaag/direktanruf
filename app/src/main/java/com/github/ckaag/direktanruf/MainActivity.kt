@@ -9,7 +9,6 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.os.Parcelable
 import android.telecom.PhoneAccountHandle
 import android.telephony.SubscriptionManager
 import android.util.Log
@@ -46,23 +45,30 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.listSaver
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.modifier.modifierLocalConsumer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat.getSystemService
+import androidx.datastore.core.CorruptionException
+import androidx.datastore.core.DataStore
+import androidx.datastore.core.Serializer
+import androidx.datastore.dataStore
+import com.github.ckaag.AppConfig
+import com.github.ckaag.CallOption
 import com.github.ckaag.direktanruf.ui.theme.DirektanrufTheme
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.PermissionStatus
 import com.google.accompanist.permissions.rememberPermissionState
-import kotlinx.parcelize.Parcelize
+import com.google.protobuf.InvalidProtocolBufferException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.InputStream
+import java.io.OutputStream
 import java.util.Collections
 
 
@@ -83,19 +89,46 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+object SettingsSerializer : Serializer<AppConfig> {
+    override val defaultValue: AppConfig = AppConfig.getDefaultInstance()
+
+    override suspend fun readFrom(input: InputStream): AppConfig {
+        try {
+            return AppConfig.parseFrom(input)
+        } catch (exception: InvalidProtocolBufferException) {
+            throw CorruptionException("Cannot read proto.", exception)
+        }
+    }
+
+    override suspend fun writeTo(
+        t: AppConfig,
+        output: OutputStream
+    ) = t.writeTo(output)
+}
+
+private val AppConfig.options: List<CallOption>
+    get() = this.optionsList.toList()
+val Context.settingsDataStore: DataStore<AppConfig> by dataStore(
+    fileName = "settings.proto",
+    serializer = SettingsSerializer
+)
+
+private val defaultAppConfig = AppConfig.getDefaultInstance()!!
 
 @SuppressLint("MissingPermission")
 @Composable
 fun ListOfItems() {
-    var appConfig by rememberSaveable { mutableStateOf(AppConfig()) }
+    val context = LocalContext.current
+    var appConfig by remember { mutableStateOf(defaultAppConfig) }
+
+
     var isEdit by remember { mutableStateOf(false) }
 
     var listOfSims by remember { mutableStateOf<List<String>>(listOf()) }
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
     val subManager = getSystemService(context, SubscriptionManager::class.java)
 
-    val permissionState = rememberPermissionState(
+    val phoneStatePermissionState = rememberPermissionState(
         permission = Manifest.permission.READ_PHONE_STATE,
         onPermissionResult = { granted ->
             if (granted) {
@@ -115,7 +148,15 @@ fun ListOfItems() {
         LaunchedEffect(listOfSims) {
             scope.launch {
                 withContext(Dispatchers.IO) {
-                    permissionState.launchPermissionRequest()
+                    context.settingsDataStore.data.take(1).collect { appConfig = it }
+                    if (phoneStatePermissionState.status != PermissionStatus.Granted) {
+                        phoneStatePermissionState.launchPermissionRequest()
+                    } else {
+                        if (subManager != null && listOfSims.isEmpty()) {
+                            val subInfoList = subManager.activeSubscriptionInfoList
+                            listOfSims = subInfoList.map { it.subscriptionId.toString() }.toList()
+                        }
+                    }
                 }
             }
         }
@@ -131,24 +172,43 @@ fun ListOfItems() {
             )
         }
         LazyColumn {
-            itemsIndexed(appConfig.options) { idx, item ->
+            itemsIndexed(appConfig.optionsList) { idx, item ->
                 ListItem(
                     item = item,
                     canChange = isEdit,
-                    onUp = { appConfig = AppConfig(moveIndexBy(appConfig.options, idx, -1)) },
-                    onDown = { appConfig = AppConfig(moveIndexBy(appConfig.options, idx, 1)) },
+                    onUp = {
+                        appConfig = buildAppConfig(moveIndexBy(appConfig.options, idx, -1))
+                        appConfig.saveSettings(context)
+                    },
+                    onDown = {
+                        appConfig = buildAppConfig(moveIndexBy(appConfig.options, idx, 1))
+                        appConfig.saveSettings(context)
+                    },
                     onRemove = {
                         appConfig =
-                            AppConfig(appConfig.options.toMutableList().also { it.removeAt(idx) })
+                            buildAppConfig(
+                                appConfig.options.toMutableList().also { it.removeAt(idx) })
+                        appConfig.saveSettings(context)
                     })
             }
         }
         if (isEdit) {
             ItemAdder(
                 listOfSims = listOfSims,
-                onAdd = { appConfig = AppConfig(appConfig.options + (it)) })
+                onAdd = {
+                    appConfig = buildAppConfig(appConfig.options + (it))
+                    appConfig.saveSettings(context)
+                })
         }
     }
+}
+
+private suspend fun AppConfig.saveSettings(context: Context) {
+    context.settingsDataStore.updateData { this }
+}
+
+fun buildAppConfig(list: List<CallOption>): AppConfig {
+    return AppConfig.newBuilder().addAllOptions(list).build()
 }
 
 fun moveIndexBy(list: List<CallOption>, idx: Int, offset: Int): List<CallOption> {
@@ -165,7 +225,7 @@ fun moveIndexBy(list: List<CallOption>, idx: Int, offset: Int): List<CallOption>
 fun ItemAdder(onAdd: suspend (CallOption) -> Unit, listOfSims: List<String>) {
     var name by remember { mutableStateOf("") }
     var number by remember { mutableStateOf("") }
-    var sim by remember { mutableStateOf("") }
+    var sim by remember { mutableStateOf(listOfSims.firstOrNull() ?: "") }
     var expanded by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     Box(
@@ -197,18 +257,22 @@ fun ItemAdder(onAdd: suspend (CallOption) -> Unit, listOfSims: List<String>) {
                     }
                 }
             }
-            Button(onClick = {
-                val option = CallOption(name = name, number = number, sim = sim)
-                name = ""
-                number = ""
-                sim = ""
-                scope.launch {
-                    withContext(Dispatchers.IO) {
-                        onAdd(option)
+            if (number.isNotBlank() && sim.isNotBlank()) {
+                Button(onClick = {
+                    val option =
+                        CallOption.newBuilder().setName(name).setNumber(number).setSim(sim)
+                            .build()!!
+                    name = ""
+                    number = ""
+                    sim = ""
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            onAdd(option)
+                        }
                     }
+                }) {
+                    Text("Neuen Eintrag hinzufügen")
                 }
-            }) {
-                Text("Neuen Eintrag hinzufügen")
             }
         }
     }
@@ -222,6 +286,16 @@ fun ListItem(
     onDown: suspend () -> Unit,
     onRemove: suspend () -> Unit,
 ) {
+    val callPermissionState = rememberPermissionState(
+        permission = Manifest.permission.CALL_PHONE,
+        onPermissionResult = { granted ->
+            if (granted) {
+                Log.e("Direktanruf", "given permission")
+            } else {
+                print("permission is denied")
+            }
+        }
+    )
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     Box(
@@ -230,7 +304,15 @@ fun ListItem(
             .fillMaxWidth()
     ) {
         Row {
-            Button(onClick = { direktAnruf(context, item.name, item.sim) }) {
+            Button(onClick = {
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        callPermissionState.launchPermissionRequest()
+                        direktAnruf(context, item.name, item.sim)
+                    }
+                }
+            })
+            {
                 Column {
                     Text(text = item.name)
                     Text(text = item.number)
@@ -304,9 +386,3 @@ fun GreetingPreview() {
         ListOfItems()
     }
 }
-
-@Parcelize
-data class CallOption(val name: String, val number: String, val sim: String) : Parcelable
-
-@Parcelize
-data class AppConfig(val options: List<CallOption> = listOf()) : Parcelable
