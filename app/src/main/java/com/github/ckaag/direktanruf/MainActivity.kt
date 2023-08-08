@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
@@ -51,6 +52,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat.getSystemService
 import androidx.datastore.core.CorruptionException
 import androidx.datastore.core.DataStore
@@ -286,37 +288,60 @@ fun ListItem(
     onDown: suspend () -> Unit,
     onRemove: suspend () -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val callPermissionState = rememberPermissionState(
         permission = Manifest.permission.CALL_PHONE,
         onPermissionResult = { granted ->
             if (granted) {
                 Log.e("Direktanruf", "given permission")
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        direktAnruf(context, item.name, item.sim)
+                    }
+                }
             } else {
                 print("permission is denied")
             }
         }
     )
-    val scope = rememberCoroutineScope()
-    val context = LocalContext.current
     Box(
         modifier = Modifier
             .border(BorderStroke(1.dp, Color.Black))
             .fillMaxWidth()
+            .padding(3.dp)
     ) {
-        Row {
-            Button(onClick = {
-                scope.launch {
-                    withContext(Dispatchers.IO) {
-                        callPermissionState.launchPermissionRequest()
-                        direktAnruf(context, item.name, item.sim)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(3.dp)
+        ) {
+            Button(
+                onClick = {
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            if (callPermissionState.status == PermissionStatus.Granted) {
+                                direktAnruf(context, item.name, item.sim)
+                            } else {
+                                callPermissionState.launchPermissionRequest()
+                            }
+                        }
                     }
-                }
-            })
+                }, modifier = if (canChange) Modifier else Modifier.fillMaxWidth()
+            )
             {
-                Column {
-                    Text(text = item.name)
-                    Text(text = item.number)
-                    Text(text = "SIM: ${item.sim}")
+                if (canChange) {
+                    Column {
+                        Text(text = item.name)
+                        Text(text = item.number)
+                        Text(text = "SIM: ${item.sim}")
+                    }
+                } else {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(text = item.name, fontSize = 28.sp)
+                        Text(text = item.number, fontSize = 20.sp)
+                        Text(text = "SIM: ${item.sim}", fontSize = 12.sp)
+                    }
                 }
             }
             if (canChange) {
