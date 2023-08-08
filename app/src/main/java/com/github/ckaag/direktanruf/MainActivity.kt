@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Parcelable
 import android.telecom.PhoneAccountHandle
 import android.telephony.SubscriptionManager
 import android.util.Log
@@ -20,10 +21,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Settings
@@ -43,10 +46,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.modifier.modifierLocalConsumer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -54,6 +59,7 @@ import androidx.core.content.ContextCompat.getSystemService
 import com.github.ckaag.direktanruf.ui.theme.DirektanrufTheme
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberPermissionState
+import kotlinx.parcelize.Parcelize
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -76,6 +82,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
 
 @SuppressLint("MissingPermission")
 @Composable
@@ -108,13 +115,13 @@ fun ListOfItems() {
         LaunchedEffect(listOfSims) {
             scope.launch {
                 withContext(Dispatchers.IO) {
-                        permissionState.launchPermissionRequest()
+                    permissionState.launchPermissionRequest()
                 }
             }
         }
     }
 
-    Column {
+    Column(modifier = Modifier.fillMaxWidth()) {
         IconButton(onClick = {
             isEdit = !isEdit
         }) {
@@ -162,7 +169,9 @@ fun ItemAdder(onAdd: suspend (CallOption) -> Unit, listOfSims: List<String>) {
     var expanded by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     Box(
-        modifier = Modifier.border(BorderStroke(2.dp, Color.Red))
+        modifier = Modifier
+            .border(BorderStroke(2.dp, Color.Red))
+            .fillMaxWidth()
     ) {
         Column {
 
@@ -216,14 +225,16 @@ fun ListItem(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     Box(
-        modifier = Modifier.border(BorderStroke(1.dp, Color.Black))
+        modifier = Modifier
+            .border(BorderStroke(1.dp, Color.Black))
+            .fillMaxWidth()
     ) {
         Row {
             Button(onClick = { direktAnruf(context, item.name, item.sim) }) {
                 Column {
                     Text(text = item.name)
                     Text(text = item.number)
-                    Text(text = "SIM: ${item.name}")
+                    Text(text = "SIM: ${item.sim}")
                 }
             }
             if (canChange) {
@@ -247,7 +258,7 @@ fun ListItem(
                     }
                 }) {
                     Icon(
-                        Icons.Filled.KeyboardArrowUp,
+                        Icons.Filled.KeyboardArrowDown,
                         "Nach unten schieben"
                     )
                 }
@@ -294,6 +305,8 @@ fun GreetingPreview() {
     }
 }
 
-data class CallOption(val name: String, val number: String, val sim: String)
+@Parcelize
+data class CallOption(val name: String, val number: String, val sim: String) : Parcelable
 
-data class AppConfig(val options: List<CallOption> = listOf())
+@Parcelize
+data class AppConfig(val options: List<CallOption> = listOf()) : Parcelable
