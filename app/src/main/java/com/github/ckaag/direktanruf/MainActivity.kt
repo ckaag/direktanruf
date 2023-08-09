@@ -297,7 +297,7 @@ fun ListItem(
                 Log.e("Direktanruf", "given permission")
                 scope.launch {
                     withContext(Dispatchers.IO) {
-                        direktAnruf(context, item.name, item.sim)
+                        direktAnruf(context, item.number, item.sim)
                     }
                 }
             } else {
@@ -321,7 +321,7 @@ fun ListItem(
                     scope.launch {
                         withContext(Dispatchers.IO) {
                             if (callPermissionState.status == PermissionStatus.Granted) {
-                                direktAnruf(context, item.name, item.sim)
+                                direktAnruf(context, item.number, item.sim)
                             } else {
                                 callPermissionState.launchPermissionRequest()
                             }
